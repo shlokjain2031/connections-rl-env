@@ -288,12 +288,12 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
             if truncated:
                 self._done = True
             self._last_one_away = 0
-            action_mask = self.valid_action_mask() if self.include_action_mask else None
-            obs = self._build_observation(action_mask=action_mask)
+            action_mask_u8 = self._current_mask_u8() if self.include_action_mask else None
+            obs = self._build_observation(action_mask_u8=action_mask_u8)
             reason = "invalid_truncation" if truncated else "invalid_action"
             info = self._make_info(
                 transition_reason=reason,
-                selected_indices=[] if selected_indices is None else list(selected_indices),
+                selected_indices=() if selected_indices is None else selected_indices,
                 is_valid_action=False,
                 invalid_reason=invalid_reason,
                 one_away=False,
@@ -335,11 +335,11 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
             solved_puzzle=solved_puzzle,
             mistakes_exhausted=mistakes_exhausted,
         )
-        action_mask = self.valid_action_mask() if self.include_action_mask else None
-        obs = self._build_observation(action_mask=action_mask)
+        action_mask_u8 = self._current_mask_u8() if self.include_action_mask else None
+        obs = self._build_observation(action_mask_u8=action_mask_u8)
         info = self._make_info(
             transition_reason=transition_reason,
-            selected_indices=list(selected_indices),
+            selected_indices=selected_indices,
             is_valid_action=True,
             solved_group_index=solved_group_idx,
             invalid_reason=None,
@@ -364,7 +364,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
     def action_to_indices(self, action_index: int) -> Tuple[int, int, int, int]:
         if action_index < 0 or action_index >= len(self._all_actions):
             raise ValueError(f"Action index out of range: {action_index}")
-        return tuple(int(v) for v in self._all_actions[action_index].tolist())
+        return tuple(int(v) for v in self._all_actions[action_index])
 
     def indices_to_action(self, indices: Sequence[int]) -> int:
         if len(indices) != 4:
@@ -380,38 +380,12 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         return self._action_lookup[clean]
 
     def valid_action_mask(self) -> np.ndarray:
-        mode = self._effective_mask_mode()
-        cache_key = (mode.value, self._get_solved_groups_bitmask())
-        cached = self._mask_cache.get(cache_key)
-        if cached is not None:
-            # Immutability assumption: cached masks are treated read-only.
-            return cached["mask"]
-
-        if mode == ActionMaskMode.ALL:
-            mask = np.ones(len(self._all_actions), dtype=np.bool_)
-            valid_indices = np.flatnonzero(mask)
-            self._validate_mask(mask)
-            self._validate_valid_indices(valid_indices)
-            self._mask_cache[cache_key] = {"mask": mask, "valid_indices": valid_indices}
-            return mask
-
-        # Stage 2: CONSISTENT intentionally aliases VALID until logical
-        # hypothesis pruning is implemented.
-        active = self._word_solved_mask == 0
-        mask = np.all(active[self._all_actions], axis=1)
-        valid_indices = np.flatnonzero(mask)
-        self._validate_mask(mask)
-        self._validate_valid_indices(valid_indices)
-        self._mask_cache[cache_key] = {"mask": mask, "valid_indices": valid_indices}
-        return mask
+        entry = self._current_mask_entry()
+        # Immutability assumption: cached masks are treated read-only.
+        return entry["mask"]
 
     def sample_valid_action(self) -> int:
-        mode = self._effective_mask_mode()
-        cache_key = (mode.value, self._get_solved_groups_bitmask())
-        entry = self._mask_cache.get(cache_key)
-        if entry is None:
-            self.valid_action_mask()
-            entry = self._mask_cache[cache_key]
+        entry = self._current_mask_entry()
         valid_indices = entry["valid_indices"]
         if valid_indices.size == 0:
             return self._rand_index(len(self._all_actions))
@@ -420,7 +394,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
     def _build_observation(
         self,
         *,
-        action_mask: Optional[np.ndarray] = None,
+        action_mask_u8: Optional[np.ndarray] = None,
     ) -> Dict[str, np.ndarray]:
         active_word_mask = (self._word_solved_mask == 0).astype(np.uint8)
         obs: Dict[str, np.ndarray] = {
@@ -438,9 +412,36 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         if self._one_away_mode == OneAwayMode.OBSERVATION:
             obs["one_away"] = np.array([self._last_one_away], dtype=np.uint8)
         if self.include_action_mask:
-            mask = self.valid_action_mask() if action_mask is None else action_mask
-            obs["action_mask"] = mask.astype(np.uint8, copy=True)
+            mask_u8 = self._current_mask_u8() if action_mask_u8 is None else action_mask_u8
+            obs["action_mask"] = mask_u8.copy()
         return obs
+
+    def _current_mask_entry(self) -> Dict[str, np.ndarray]:
+        mode = self._effective_mask_mode()
+        cache_key = (mode.value, self._get_solved_groups_bitmask())
+        cached = self._mask_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if mode == ActionMaskMode.ALL:
+            mask = np.ones(len(self._all_actions), dtype=np.bool_)
+        else:
+            # Stage 2: CONSISTENT intentionally aliases VALID until logical
+            # hypothesis pruning is implemented.
+            active = self._word_solved_mask == 0
+            mask = np.all(active[self._all_actions], axis=1)
+
+        valid_indices = np.flatnonzero(mask)
+        mask_u8 = mask.view(np.uint8)
+        self._validate_mask(mask)
+        self._validate_valid_indices(valid_indices)
+        self._validate_mask_u8(mask_u8)
+        entry = {"mask": mask, "valid_indices": valid_indices, "mask_u8": mask_u8}
+        self._mask_cache[cache_key] = entry
+        return entry
+
+    def _current_mask_u8(self) -> np.ndarray:
+        return self._current_mask_entry()["mask_u8"]
 
     def _get_solved_groups_bitmask(self) -> int:
         bitmask = 0
@@ -455,6 +456,11 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
 
     def _validate_valid_indices(self, valid_indices: np.ndarray) -> None:
         assert valid_indices.ndim == 1
+        assert valid_indices.dtype.kind in ("i", "u")
+
+    def _validate_mask_u8(self, mask_u8: np.ndarray) -> None:
+        assert mask_u8.shape == (len(self._all_actions),)
+        assert mask_u8.dtype == np.uint8
 
     def _make_info(
         self,
@@ -488,15 +494,27 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
 
     def _evaluate_selection(self, indices: Sequence[int]) -> Tuple[bool, Optional[int]]:
         assert self._puzzle is not None
-        group_ids = {int(self._group_by_word[idx]) for idx in indices}
-        if len(group_ids) != 1:
+        i0, i1, i2, i3 = (int(indices[0]), int(indices[1]), int(indices[2]), int(indices[3]))
+        g0 = int(self._group_by_word[i0])
+        if g0 < 0 or g0 >= 4:
             return False, None
-        group_id = next(iter(group_ids))
-        if group_id < 0 or group_id >= 4:
+        if int(self._group_by_word[i1]) != g0:
+            return False, None
+        if int(self._group_by_word[i2]) != g0:
+            return False, None
+        if int(self._group_by_word[i3]) != g0:
             return False, None
 
-        true_group = set(self._puzzle.groups[group_id])
-        if set(indices) == true_group and self._group_solved_mask[group_id] == 0:
+        group_id = g0
+
+        true_group = self._puzzle.groups[group_id]
+        if (
+            self._group_solved_mask[group_id] == 0
+            and i0 in true_group
+            and i1 in true_group
+            and i2 in true_group
+            and i3 in true_group
+        ):
             return True, group_id
         return False, None
 
@@ -524,16 +542,36 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
             if isinstance(action, (str, bytes)):
                 return None, "unsupported_action_type"
             try:
-                raw = [int(v) for v in action]
+                iterator = iter(action)
+                a = int(next(iterator))
+                b = int(next(iterator))
+                c = int(next(iterator))
+                d = int(next(iterator))
+                try:
+                    next(iterator)
+                    return None, "invalid_action_arity"
+                except StopIteration:
+                    pass
             except Exception:
                 return None, "unsupported_action_type"
-            if len(raw) != 4:
-                return None, "invalid_action_arity"
-            if len(set(raw)) != 4:
-                return None, "duplicate_word_indices"
-            if any(idx < 0 or idx >= 16 for idx in raw):
+            if a < 0 or a >= 16 or b < 0 or b >= 16 or c < 0 or c >= 16 or d < 0 or d >= 16:
                 return None, "word_index_out_of_range"
-            selected = tuple(sorted(raw))
+            if a == b or a == c or a == d or b == c or b == d or c == d:
+                return None, "duplicate_word_indices"
+
+            # Sort network for 4 elements to avoid temporary list allocations.
+            if a > b:
+                a, b = b, a
+            if c > d:
+                c, d = d, c
+            if a > c:
+                a, c = c, a
+            if b > d:
+                b, d = d, b
+            if b > c:
+                b, c = c, b
+
+            selected = (a, b, c, d)
 
         if any(self._word_solved_mask[idx] == 1 for idx in selected):
             return selected, "contains_solved_word"
