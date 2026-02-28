@@ -123,9 +123,3 @@ python3 benchmarks/benchmark_connections_env.py
 python3 scripts/perf_guardrail_connections.py
 python3 scripts/gen_connections_baseline.py --output benchmarks/connections_perf_baseline.json
 ```
-
-## Docs
-
-- [Architecture](docs/architecture.md)
-- [Masking semantics](docs/masking.md)
-- [Benchmarks and guardrails](docs/benchmarks.md)
