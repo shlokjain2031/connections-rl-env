@@ -24,6 +24,7 @@ def run_single_mode_benchmark(steps: int, *, mode: ActionMaskMode) -> Dict[str, 
         if terminated or truncated:
             env.reset(seed=0)
     elapsed = time.perf_counter() - start
+    print("mask cache size:", len(env._mask_cache), file=sys.stderr)
 
     return {
         "steps": float(steps),
@@ -42,6 +43,8 @@ def run_vector_benchmark(steps: int, num_envs: int) -> Dict[str, float]:
         actions = [env.sample_valid_action() for env in vec.envs]
         vec.step(actions)
     elapsed = time.perf_counter() - start
+    if vec.envs:
+        print("mask cache size:", len(vec.envs[0]._mask_cache), file=sys.stderr)
     vec.close()
 
     return {

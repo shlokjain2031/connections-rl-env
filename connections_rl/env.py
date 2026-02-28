@@ -123,6 +123,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
 
         self._all_actions = np.array(list(combinations(range(16), 4)), dtype=np.int16)
         self._action_lookup = {tuple(action.tolist()): idx for idx, action in enumerate(self._all_actions)}
+        self._mask_cache: Dict[Tuple[str, int], np.ndarray] = {}
 
         self._rng = Random()
         self._puzzle: Optional[Puzzle] = None
@@ -241,6 +242,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         self._labels_encoded.fill(self.LABEL_UNKNOWN_TOKEN)
         self._true_labels_encoded.fill(self.LABEL_PAD_TOKEN)
         self._last_one_away = 0
+        self._mask_cache.clear()
 
         for group_idx, group in enumerate(selected.groups):
             for word_idx in group:
@@ -284,7 +286,8 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
             if truncated:
                 self._done = True
             self._last_one_away = 0
-            obs = self._build_observation()
+            action_mask = self.valid_action_mask() if self.include_action_mask else None
+            obs = self._build_observation(action_mask=action_mask)
             reason = "invalid_truncation" if truncated else "invalid_action"
             info = self._make_info(
                 transition_reason=reason,
@@ -330,7 +333,8 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
             solved_puzzle=solved_puzzle,
             mistakes_exhausted=mistakes_exhausted,
         )
-        obs = self._build_observation()
+        action_mask = self.valid_action_mask() if self.include_action_mask else None
+        obs = self._build_observation(action_mask=action_mask)
         info = self._make_info(
             transition_reason=transition_reason,
             selected_indices=list(selected_indices),
@@ -375,14 +379,24 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
 
     def valid_action_mask(self) -> np.ndarray:
         mode = self._effective_mask_mode()
+        cache_key = (mode.value, self._get_solved_groups_bitmask())
+        cached = self._mask_cache.get(cache_key)
+        if cached is not None:
+            return cached.copy()
+
         if mode == ActionMaskMode.ALL:
-            return np.ones(len(self._all_actions), dtype=np.uint8)
+            mask = np.ones(len(self._all_actions), dtype=np.uint8)
+            self._validate_mask(mask)
+            self._mask_cache[cache_key] = mask
+            return mask.copy()
 
         # Stage 2: CONSISTENT intentionally aliases VALID until logical
         # hypothesis pruning is implemented.
         active = self._word_solved_mask == 0
         mask = np.all(active[self._all_actions], axis=1).astype(np.uint8)
-        return mask
+        self._validate_mask(mask)
+        self._mask_cache[cache_key] = mask
+        return mask.copy()
 
     def sample_valid_action(self) -> int:
         mask = self.valid_action_mask()
@@ -391,7 +405,11 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
             return self._rand_index(len(self._all_actions))
         return int(valid_indices[self._rand_index(valid_indices.size)])
 
-    def _build_observation(self) -> Dict[str, np.ndarray]:
+    def _build_observation(
+        self,
+        *,
+        action_mask: Optional[np.ndarray] = None,
+    ) -> Dict[str, np.ndarray]:
         active_word_mask = (self._word_solved_mask == 0).astype(np.uint8)
         obs: Dict[str, np.ndarray] = {
             "words": self._words_encoded.copy(),
@@ -408,8 +426,19 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         if self._one_away_mode == OneAwayMode.OBSERVATION:
             obs["one_away"] = np.array([self._last_one_away], dtype=np.uint8)
         if self.include_action_mask:
-            obs["action_mask"] = self.valid_action_mask()
+            obs["action_mask"] = self.valid_action_mask() if action_mask is None else action_mask.copy()
         return obs
+
+    def _get_solved_groups_bitmask(self) -> int:
+        bitmask = 0
+        for group_idx in range(4):
+            if self._group_solved_mask[group_idx] == 1:
+                bitmask |= 1 << group_idx
+        return bitmask
+
+    def _validate_mask(self, mask: np.ndarray) -> None:
+        assert mask.shape == (len(self._all_actions),)
+        assert mask.dtype in (np.bool_, np.uint8)
 
     def _make_info(
         self,

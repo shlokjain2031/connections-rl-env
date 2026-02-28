@@ -170,6 +170,34 @@ class ConnectionsEnvTests(unittest.TestCase):
         # After solving one group, legal actions choose 4 from remaining 12 words.
         self.assertEqual(int(after.sum()), 495)
 
+    def test_action_mask_cache_reused_and_reset_clears(self) -> None:
+        env = ConnectionsEnv(action_mask_mode=ActionMaskMode.VALID, include_action_mask=False)
+        env.reset(options={"puzzle_id": "puzzle-001"})
+        self.assertEqual(len(env._mask_cache), 0)
+
+        m1 = env.valid_action_mask()
+        self.assertEqual(m1.shape, (1820,))
+        self.assertEqual(m1.dtype, np.uint8)
+        self.assertEqual(len(env._mask_cache), 1)
+
+        # Same solved-group state and mode should hit cache, not add keys.
+        _ = env.valid_action_mask()
+        self.assertEqual(len(env._mask_cache), 1)
+
+        # Wrong guess keeps solved-group state unchanged.
+        env.step((0, 4, 8, 12))
+        _ = env.valid_action_mask()
+        self.assertEqual(len(env._mask_cache), 1)
+
+        # Solving a group changes solved-group bitmask and creates one new key.
+        env.step((0, 1, 2, 3))
+        _ = env.valid_action_mask()
+        self.assertEqual(len(env._mask_cache), 2)
+
+        # Reset explicitly clears cache.
+        env.reset(options={"puzzle_id": "puzzle-001"})
+        self.assertEqual(len(env._mask_cache), 0)
+
     def test_info_includes_dataset_hash_and_counters(self) -> None:
         env = ConnectionsEnv()
         _, info = env.reset(options={"puzzle_id": "puzzle-001"})
