@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "connections-rl-env"
+version = "0.1.0"
+description = "Connections environment for reinforcement learning."
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+gym = ["gymnasium>=0.29"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["connections_rl*"]
+
+[tool.setuptools.package-data]
+"connections_rl.data" = ["*.json", "*.md"]

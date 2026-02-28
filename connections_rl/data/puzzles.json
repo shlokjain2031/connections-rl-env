@@ -1,0 +1,29 @@
+[
+  {
+    "id": "puzzle-001",
+    "groups": [
+      {"label": "ANIMALS", "words": ["lion", "tiger", "zebra", "horse"]},
+      {"label": "TOOLS", "words": ["hammer", "saw", "drill", "wrench"]},
+      {"label": "COLORS", "words": ["red", "blue", "green", "yellow"]},
+      {"label": "INSTRUMENTS", "words": ["piano", "violin", "flute", "drums"]}
+    ]
+  },
+  {
+    "id": "puzzle-002",
+    "groups": [
+      {"label": "FRUITS", "words": ["apple", "grape", "mango", "peach"]},
+      {"label": "SHAPES", "words": ["circle", "square", "triangle", "oval"]},
+      {"label": "WEATHER", "words": ["rain", "snow", "wind", "storm"]},
+      {"label": "SCHOOL", "words": ["book", "desk", "chalk", "ruler"]}
+    ]
+  },
+  {
+    "id": "puzzle-003",
+    "groups": [
+      {"label": "BIRDS", "words": ["eagle", "robin", "sparrow", "falcon"]},
+      {"label": "SPORTS", "words": ["soccer", "tennis", "hockey", "rugby"]},
+      {"label": "VEHICLES", "words": ["car", "truck", "bus", "train"]},
+      {"label": "DRINKS", "words": ["water", "juice", "coffee", "tea"]}
+    ]
+  }
+]
