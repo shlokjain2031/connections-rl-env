@@ -1,6 +1,6 @@
 # Connections RL Environment
 
-High-fidelity Connections environment for reinforcement learning with deterministic puzzle sampling, configurable masking behavior, and training-ready observations.
+Connections environment for reinforcement learning with deterministic puzzle sampling, configurable masking behavior, and training-ready observations.
 
 ## What is included
 
