@@ -14,7 +14,7 @@ from connections_rl import ActionMaskMode, ConnectionsEnv, ConnectionsVectorEnv
 
 
 def _single_sps(steps: int, warmup_steps: int, mode: ActionMaskMode) -> float:
-    env = ConnectionsEnv(action_mask_mode=mode, include_action_mask=True)
+    env = ConnectionsEnv(action_mask_mode=mode, include_action_mask=True, include_info=False)
     env.reset(seed=0)
 
     for _ in range(warmup_steps):
@@ -35,7 +35,7 @@ def _single_sps(steps: int, warmup_steps: int, mode: ActionMaskMode) -> float:
 
 
 def _vector_sps(steps: int, warmup_steps: int, num_envs: int) -> float:
-    vec = ConnectionsVectorEnv(num_envs=num_envs, include_action_mask=True)
+    vec = ConnectionsVectorEnv(num_envs=num_envs, include_action_mask=True, include_info=False)
     vec.reset(seed=0)
 
     for _ in range(warmup_steps):

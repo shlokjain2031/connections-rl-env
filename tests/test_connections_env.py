@@ -177,7 +177,7 @@ class ConnectionsEnvTests(unittest.TestCase):
 
         m1 = env.valid_action_mask()
         self.assertEqual(m1.shape, (1820,))
-        self.assertEqual(m1.dtype, np.uint8)
+        self.assertEqual(m1.dtype, np.bool_)
         self.assertEqual(len(env._mask_cache), 1)
 
         # Same solved-group state and mode should hit cache, not add keys.

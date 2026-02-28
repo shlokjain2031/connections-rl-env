@@ -87,6 +87,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         max_word_length: int = 12,
         max_label_length: int = 16,
         render_mode: Optional[str] = None,
+        include_info: bool = True,
     ) -> None:
         if mistake_budget <= 0:
             raise ValueError("mistake_budget must be >= 1")
@@ -111,6 +112,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         self.max_word_length = int(max_word_length)
         self.max_label_length = int(max_label_length)
         self.render_mode = render_mode
+        self.include_info = bool(include_info)
         if self.render_mode not in (None, "ansi"):
             raise ValueError("render_mode must be one of: None, 'ansi'")
 
@@ -123,7 +125,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
 
         self._all_actions = np.array(list(combinations(range(16), 4)), dtype=np.int16)
         self._action_lookup = {tuple(action.tolist()): idx for idx, action in enumerate(self._all_actions)}
-        self._mask_cache: Dict[Tuple[str, int], np.ndarray] = {}
+        self._mask_cache: Dict[Tuple[str, int], Dict[str, np.ndarray]] = {}
 
         self._rng = Random()
         self._puzzle: Optional[Puzzle] = None
@@ -382,25 +384,35 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         cache_key = (mode.value, self._get_solved_groups_bitmask())
         cached = self._mask_cache.get(cache_key)
         if cached is not None:
-            return cached.copy()
+            # Immutability assumption: cached masks are treated read-only.
+            return cached["mask"]
 
         if mode == ActionMaskMode.ALL:
-            mask = np.ones(len(self._all_actions), dtype=np.uint8)
+            mask = np.ones(len(self._all_actions), dtype=np.bool_)
+            valid_indices = np.flatnonzero(mask)
             self._validate_mask(mask)
-            self._mask_cache[cache_key] = mask
-            return mask.copy()
+            self._validate_valid_indices(valid_indices)
+            self._mask_cache[cache_key] = {"mask": mask, "valid_indices": valid_indices}
+            return mask
 
         # Stage 2: CONSISTENT intentionally aliases VALID until logical
         # hypothesis pruning is implemented.
         active = self._word_solved_mask == 0
-        mask = np.all(active[self._all_actions], axis=1).astype(np.uint8)
+        mask = np.all(active[self._all_actions], axis=1)
+        valid_indices = np.flatnonzero(mask)
         self._validate_mask(mask)
-        self._mask_cache[cache_key] = mask
-        return mask.copy()
+        self._validate_valid_indices(valid_indices)
+        self._mask_cache[cache_key] = {"mask": mask, "valid_indices": valid_indices}
+        return mask
 
     def sample_valid_action(self) -> int:
-        mask = self.valid_action_mask()
-        valid_indices = np.flatnonzero(mask)
+        mode = self._effective_mask_mode()
+        cache_key = (mode.value, self._get_solved_groups_bitmask())
+        entry = self._mask_cache.get(cache_key)
+        if entry is None:
+            self.valid_action_mask()
+            entry = self._mask_cache[cache_key]
+        valid_indices = entry["valid_indices"]
         if valid_indices.size == 0:
             return self._rand_index(len(self._all_actions))
         return int(valid_indices[self._rand_index(valid_indices.size)])
@@ -426,7 +438,8 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         if self._one_away_mode == OneAwayMode.OBSERVATION:
             obs["one_away"] = np.array([self._last_one_away], dtype=np.uint8)
         if self.include_action_mask:
-            obs["action_mask"] = self.valid_action_mask() if action_mask is None else action_mask.copy()
+            mask = self.valid_action_mask() if action_mask is None else action_mask
+            obs["action_mask"] = mask.astype(np.uint8, copy=True)
         return obs
 
     def _get_solved_groups_bitmask(self) -> int:
@@ -438,7 +451,10 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
 
     def _validate_mask(self, mask: np.ndarray) -> None:
         assert mask.shape == (len(self._all_actions),)
-        assert mask.dtype in (np.bool_, np.uint8)
+        assert mask.dtype == np.bool_
+
+    def _validate_valid_indices(self, valid_indices: np.ndarray) -> None:
+        assert valid_indices.ndim == 1
 
     def _make_info(
         self,
@@ -450,6 +466,8 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
         invalid_reason: Optional[str] = None,
         one_away: Optional[bool] = None,
     ) -> Dict[str, object]:
+        if not self.include_info:
+            return {}
         info: Dict[str, object] = {
             "puzzle_id": self.current_puzzle_id,
             "dataset_hash": self.dataset_hash_short,
@@ -501,7 +519,7 @@ class ConnectionsEnv(gym.Env if _HAS_GYMNASIUM else object):  # type: ignore[mis
             action_idx = int(action)
             if action_idx < 0 or action_idx >= len(self._all_actions):
                 return None, "action_index_out_of_range"
-            selected = tuple(int(v) for v in self._all_actions[action_idx].tolist())
+            selected = tuple(int(v) for v in self._all_actions[action_idx])
         else:
             if isinstance(action, (str, bytes)):
                 return None, "unsupported_action_type"

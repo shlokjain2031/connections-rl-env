@@ -14,7 +14,7 @@ from connections_rl import ActionMaskMode, ConnectionsEnv, ConnectionsVectorEnv
 
 
 def run_single_mode_benchmark(steps: int, *, mode: ActionMaskMode) -> Dict[str, float]:
-    env = ConnectionsEnv(action_mask_mode=mode, include_action_mask=True)
+    env = ConnectionsEnv(action_mask_mode=mode, include_action_mask=True, include_info=False)
     env.reset(seed=0)
 
     start = time.perf_counter()
@@ -34,7 +34,7 @@ def run_single_mode_benchmark(steps: int, *, mode: ActionMaskMode) -> Dict[str, 
 
 
 def run_vector_benchmark(steps: int, num_envs: int) -> Dict[str, float]:
-    vec = ConnectionsVectorEnv(num_envs=num_envs, include_action_mask=True)
+    vec = ConnectionsVectorEnv(num_envs=num_envs, include_action_mask=True, include_info=False)
     vec.reset(seed=0)
     total_steps = steps * num_envs
 
